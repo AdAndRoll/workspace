@@ -19,5 +19,14 @@
 ```bash
 git clone https://github.com/ваш-username/ваш-репозиторий.git
 cd ваш-репозиторий
+```
 
-### ***2. Откройте проект в VS Code***
+### **2. Откройте проект в VS Code**
+```bash
+code .
+```
+### **3. Запустите контейнер**
+
+1. Нажмите Ctrl+Shift+P → Remote-Containers: Reopen in Container.
+
+2. Дождитесь сборки образа (3-5 минут при первом запуске).
