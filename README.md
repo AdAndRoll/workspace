@@ -69,7 +69,33 @@ Hello, World!
 rm -rf build && cmake -B build -S . && cmake --build build
 ```
 
+## Задание 5
 
+### для запуска сервера нужно ввести комманду 
+```bash
+./build/workspace
+```
+### пример ответа на любой запрос:
+```bash
+curl -X POST http://localhost:8080 -H "X-Test: true" -d '{"message": "Test"}'
+```
+```bash
+Method: POST
+Path: /
+Headers:
+  LOCAL_ADDR: 127.0.0.1
+  REMOTE_ADDR: 127.0.0.1
+  Content-Type: application/x-www-form-urlencoded
+  X-Test: true
+  REMOTE_PORT: 43990
+  Accept: */*
+  LOCAL_PORT: 8080
+  Content-Length: 19
+  User-Agent: curl/8.5.0
+  Host: localhost:8080
+Body:
+{"message": "Test"}
+```
 
 
 
