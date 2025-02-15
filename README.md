@@ -19,3 +19,4 @@
 ```bash
 git clone https://github.com/ваш-username/ваш-репозиторий.git
 cd ваш-репозиторий
+### 2. Откройте проект в VS Code
