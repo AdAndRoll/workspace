@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.10)
+
+# Автоматически определяем имя проекта на основе имени корневой директории
+get_filename_component(PROJECT_NAME ${CMAKE_SOURCE_DIR} NAME)
+string(REPLACE " " "_" PROJECT_NAME ${PROJECT_NAME})
+project(${PROJECT_NAME})
+
+# Указываем стандарт C++ (например, C++17)
+set(CMAKE_CXX_STANDARD 17)
+
+# Рекурсивно ищем все .cpp и .h файлы в проекте
+file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.h")
+file(GLOB_RECURSE HEADERS "include/*.h" "src/*.h")
+
+# Указываем, что нужно собрать исполняемый файл
+add_executable(${PROJECT_NAME} ${SOURCES})
+
+# Указываем директории для заголовочных файлов
+target_include_directories(${PROJECT_NAME} PRIVATE include src)
+
+# Если нужно подключить библиотеки, используйте target_link_libraries
+# target_link_libraries(${PROJECT_NAME} some_library)

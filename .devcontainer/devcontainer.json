@@ -1,0 +1,25 @@
+{
+    "name": "C++ Development",
+    "dockerFile": "../Dockerfile",  // Путь к Dockerfile относительно папки .devcontainer
+    "context": "..",               // Контекст сборки - корень проекта (d:\vsCodeProjects)
+    "workspaceFolder": "/workspace",  // Рабочая папка в контейнере
+
+    // Явное монтирование папки проекта
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    ],
+
+    // Настройки для VS Code
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "cmake.buildDirectory": "${workspaceFolder}/build"
+            },
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools"
+            ]
+        }
+    }
+}
