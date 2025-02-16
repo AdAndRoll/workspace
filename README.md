@@ -118,6 +118,7 @@ curl -X POST http://localhost:8080/api/calculate   -H "Content-Type: application
 output
 ```bash
 {"res":14.0}
+```
 ---
 
 ### Задание 8
