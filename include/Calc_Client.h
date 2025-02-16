@@ -24,12 +24,37 @@ namespace calcclient {
         } else if (flag == "-e") {
             // Режим выражения: объединяем все аргументы начиная с argv[2]
             std::ostringstream oss;
+            std::string expression;
             for (int i = 2; i < argc; ++i) {
-                oss << argv[i];
+                expression += argv[i];
                 if (i < argc - 1)
-                    oss << " ";
+                    expression += " ";
             }
-            request_json["exp"] = oss.str();
+
+            // Обрабатываем многострочные запросы
+            std::string full_expr;
+            std::istringstream expr_stream(expression);
+            std::string line;
+            bool multi_line = false;
+
+            while (std::getline(expr_stream, line)) {
+                // Проверяем на наличие продолжения строки с символом '\'
+                if (line.back() == '\\') {
+                    line.pop_back();  // Убираем символ продолжения
+                    full_expr += line + " ";  // Добавляем строку в полный запрос
+                    multi_line = true;
+                } else {
+                    full_expr += line;  // Строка завершена
+                    if (multi_line) {
+                        // Если это многострочное выражение, отправляем запрос
+                        request_json["exp"] = full_expr;
+                        multi_line = false;
+                    } else {
+                        // Для однострочных выражений также передаем запрос
+                        request_json["exp"] = full_expr;
+                    }
+                }
+            }
         } else {
             std::cerr << "Unknown flag: " << flag << "\n";
             std::cerr << "Usage: " << argv[0] << " -c <command> OR -e <expression...>\n";
