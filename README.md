@@ -153,6 +153,22 @@ c ответом
 ```bash
 10.0
 ```
+---
+### Задание 10
+```bash
+./build/calc_client -e x=2
+"OK"
+./build/calc_client -e "var = 2 + 3; \
+var * 2"
+10.0
+./build/calc_client -e var
+5.0
+./build/calc_client -c clean
+"OK"
+./build/calc_client -e x
+Request failed. Status: 400
+
+```
 
 
 
