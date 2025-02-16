@@ -1,245 +1,218 @@
 #pragma once
-
-#include <iostream>
-#include <stack>
+#include "Token.h"
 #include <queue>
-#include <sstream>
 #include <map>
+#include <sstream>
 #include <stdexcept>
-#include <unordered_map>
+#include <cctype>
 
-using namespace std;
+class Calculator {
+public:
+    static std::string trim(const std::string& s) {
+        auto start = s.find_first_not_of(" ");
+        auto end = s.find_last_not_of(" ");
+        return (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
+    }
 
-// ========================
-// Структуры данных
-// ========================
-
-enum TokenType { NUMBER, OPERATOR, LEFT_PAREN, RIGHT_PAREN, VARIABLE };
-
-struct Token {
-    TokenType type;
-    double value;
-    char op;
-    string variable_name;
-
-    Token(double val) : type(NUMBER), value(val), op(0) {}
-    Token(char ch) : type(OPERATOR), value(0), op(ch) {}
-    Token(TokenType t) : type(t), value(0), op(0) {}
-    Token(string var) : type(VARIABLE), value(0), variable_name(var) {}
-};
-
-// Теперь переменные хранятся в сессиях
-extern map<string, map<string, double>> sessions;
-
-// ========================
-// Объявления функций
-// ========================
-
-queue<Token> tokenize(const string& expr);
-queue<Token> shunting_yard(queue<Token> tokens);
-double evaluate(queue<Token> postfix, const string& user);
-void run_calculator();
-
-// ========================
-// Реализация функций
-// ========================
-
-queue<Token> tokenize(const string& expr) {
-    queue<Token> tokens;
-    string num_str, var_str;
-    bool negative_number = false;
-
-    for (size_t i = 0; i < expr.size(); ++i) {
-        char c = expr[i];
-
-        if (isdigit(c) || c == '.' || (c == '-' && (i == 0 || expr[i-1] == '('))) {
-            if (c == '-' && (i == 0 || expr[i-1] == '(')) {
-                negative_number = true;
-                continue;
-            }
-            num_str += c;
+    double calculate(const std::string& expr, std::map<std::string, double>& vars) {
+        auto tokens = tokenize(expr);
+        bool is_assignment = process_assignments(tokens, vars);
+        
+        if (is_assignment) {
+            return vars[last_assigned_var_];
         } else {
-            if (!num_str.empty()) {
-                double num = stod(num_str);
-                if (negative_number) {
-                    num = -num;
-                    negative_number = false;
+            auto postfix = shunting_yard(tokens);
+            return evaluate(postfix, vars);
+        }
+    }
+
+    bool was_assignment() const { return !last_assigned_var_.empty(); }
+    std::string get_last_var() const { return last_assigned_var_; }
+
+private:
+    std::string last_assigned_var_;
+
+    std::queue<Token> tokenize(const std::string& expr) {
+        std::queue<Token> tokens;
+        std::string buffer;
+        bool negative = false;
+
+        for (size_t i = 0; i < expr.size(); ++i) {
+            char c = expr[i];
+
+            if (isdigit(c) || c == '.' || (c == '-' && (i == 0 || expr[i-1] == '('))) {
+                if (c == '-' && (i == 0 || expr[i-1] == '(')) {
+                    negative = true;
+                    continue;
                 }
-                tokens.push(Token(num));
-                num_str.clear();
+                buffer += c;
+            } else {
+                if (!buffer.empty()) {
+                    handle_buffer(buffer, negative, tokens);
+                    buffer.clear();
+                    negative = false;
+                }
+
+                if (c == ' ') continue;
+
+                switch(c) {
+                    case '+': case '-': case '*': case '/': 
+                        tokens.emplace(c); break;
+                    case '(': tokens.emplace(TokenType::LeftParen); break;
+                    case ')': tokens.emplace(TokenType::RightParen); break;
+                    case '=': tokens.emplace(TokenType::Assignment); break;
+                    default:
+                        if (isalpha(c)) {
+                            std::string var;
+                            while (i < expr.size() && (isalnum(expr[i]) || expr[i] == '_')) {
+                                var += expr[i++];
+                            }
+                            i--;
+                            tokens.emplace(var);
+                        } else {
+                            throw std::runtime_error("Invalid character: " + std::string(1, c));
+                        }
+                }
             }
+        }
 
-            if (!var_str.empty()) {
-                tokens.push(Token(var_str));
-                var_str.clear();
-            }
+        if (!buffer.empty()) handle_buffer(buffer, negative, tokens);
+        return tokens;
+    }
 
-            if (c == ' ') continue;
+    void handle_buffer(std::string& buffer, bool negative, std::queue<Token>& tokens) {
+        double num = stod(buffer);
+        if (negative) num = -num;
+        tokens.emplace(num);
+    }
 
-            switch(c) {
-                case '+': case '-': case '*': case '/':
-                    tokens.push(Token(c));
-                    break;
-                case '(':
-                    tokens.push(Token(LEFT_PAREN));
-                    break;
-                case ')':
-                    tokens.push(Token(RIGHT_PAREN));
-                    break;
-                case '=':
-                    if (!tokens.empty() && tokens.back().type == VARIABLE) {
-                        tokens.push(Token(OPERATOR));
-                    } else {
-                        throw invalid_argument("Invalid assignment format");
+    std::queue<Token> shunting_yard(std::queue<Token> tokens) {
+        std::queue<Token> output;
+        std::stack<Token> ops;
+
+        while (!tokens.empty()) {
+            Token token = tokens.front();
+            tokens.pop();
+
+            switch(token.type) {
+                case TokenType::Number:
+                case TokenType::Variable:
+                    output.push(token); break;
+
+                case TokenType::Operator:
+                    while (!ops.empty() && is_higher_precedence(ops.top(), token)) {
+                        output.push(ops.top());
+                        ops.pop();
                     }
+                    ops.push(token);
                     break;
-                default:
-                    if (isalpha(c)) {
-                        var_str += c;
-                    } else {
-                        throw invalid_argument("Invalid character: " + string(1, c));
+
+                case TokenType::LeftParen:
+                    ops.push(token); break;
+
+                case TokenType::RightParen:
+                    while (!ops.empty() && ops.top().type != TokenType::LeftParen) {
+                        output.push(ops.top());
+                        ops.pop();
                     }
-            }
-        }
-    }
-
-    if (!num_str.empty()) {
-        double num = stod(num_str);
-        if (negative_number) num = -num;
-        tokens.push(Token(num));
-    }
-
-    if (!var_str.empty()) {
-        tokens.push(Token(var_str));
-    }
-
-    return tokens;
-}
-
-// Используем пользовательскую сессию при вычислениях
-double evaluate(queue<Token> postfix, const string& user) {
-    if (postfix.empty()) {
-        throw runtime_error("Empty expression");
-    }
-
-    stack<double> values;
-    if (user.empty()) {
-        throw runtime_error("User session not specified");
-    }
-    if (sessions.find(user) == sessions.end()) {
-        throw runtime_error("User session does not exist");
-    }
-    while (!postfix.empty()) {
-        Token token = postfix.front();
-        postfix.pop();
-
-        if (token.type == NUMBER) {
-            values.push(token.value);
-        } 
-        else if (token.type == OPERATOR) {
-            if (values.size() < 2) throw invalid_argument("Invalid expression");
-
-            double b = values.top(); values.pop();
-            double a = values.top(); values.pop();
-
-            switch(token.op) {
-                case '+': values.push(a + b); break;
-                case '-': values.push(a - b); break;
-                case '*': values.push(a * b); break;
-                case '/': 
-                    if (b == 0) throw runtime_error("Division by zero");
-                    values.push(a / b);
+                    if (ops.empty()) throw std::runtime_error("Mismatched parentheses");
+                    ops.pop();
                     break;
+
+                default: break;
             }
         }
-        else if (token.type == VARIABLE) {
-            if (sessions[user].find(token.variable_name) == sessions[user].end()) {
-                throw runtime_error("Variable not defined: " + token.variable_name);
-            }
-            values.push(sessions[user][token.variable_name]);
-        }
-    }
 
-    if (values.size() != 1) throw invalid_argument("Invalid expression");
-    return values.top();
-}
-
-// Функция преобразования из инфиксной записи в постфиксную (реализация в заголовочном файле)
-inline queue<Token> shunting_yard(queue<Token> tokens) {
-    stack<Token> ops;
-    queue<Token> output;
-
-    while (!tokens.empty()) {
-        Token token = tokens.front();
-        tokens.pop();
-
-        if (token.type == NUMBER || token.type == VARIABLE) {
-            output.push(token);
-        } else if (token.type == OPERATOR) {
-            while (!ops.empty() && ops.top().type == OPERATOR &&
-                   ((token.op == '+' || token.op == '-') && (ops.top().op == '*' || ops.top().op == '/'))) {
-                output.push(ops.top());
-                ops.pop();
-            }
-            ops.push(token);
-        } else if (token.type == LEFT_PAREN) {
-            ops.push(token);
-        } else if (token.type == RIGHT_PAREN) {
-            while (!ops.empty() && ops.top().type != LEFT_PAREN) {
-                output.push(ops.top());
-                ops.pop();
-            }
-            if (ops.empty()) throw invalid_argument("Mismatched parentheses");
+        while (!ops.empty()) {
+            output.push(ops.top());
             ops.pop();
         }
+        return output;
     }
 
-    while (!ops.empty()) {
-        output.push(ops.top());
-        ops.pop();
+    bool is_higher_precedence(const Token& op1, const Token& op2) {
+        if (op1.type != TokenType::Operator) return false;
+        return (op1.operator_symbol == '*' || op1.operator_symbol == '/') &&
+               (op2.operator_symbol == '+' || op2.operator_symbol == '-');
     }
 
-    return output;
-}
+    bool process_assignments(std::queue<Token>& tokens, std::map<std::string, double>& vars) {
+        if (tokens.size() < 3) return false;
+        
+        // Сохраняем исходные токены для восстановления в случае ошибки
+        std::queue<Token> original_tokens = tokens;
+        
+        try {
+            Token var_token = tokens.front();
+            if (var_token.type != TokenType::Variable) return false;
+            std::string var = var_token.variable_name;
+            tokens.pop();
 
-void run_calculator() {
-    cout << "Calculator (enter 'exit' to quit, 'set <var> <value>' to set variable, 'user <name>' to change session)\n";
-    string input;
-    string user = "default"; // По умолчанию используем сессию "default"
-
-    while (true) {
-        cout << "[" << user << "]> ";
-        getline(cin, input);
-        if (input.empty()) continue;
-        if (input == "exit") break;
-
-        if (input.substr(0, 3) == "set") {
-            stringstream ss(input.substr(4));
-            string var_name;
-            double value;
-            if (!(ss >> var_name >> value)) {
-                cerr << "Invalid set command format\n";
-                continue;
+            if (tokens.front().type != TokenType::Assignment) {
+                tokens = original_tokens;
+                return false;
             }
-            sessions[user][var_name] = value;
-            cout << var_name << " set to " << value << " in session " << user << "\n";
-        } 
-        else if (input.substr(0, 4) == "user") {
-            stringstream ss(input.substr(5));
-            ss >> user;
-            if (user.empty()) user = "default";
-            cout << "Switched to user session: " << user << "\n";
-        } 
-        else {
-            try {
-                queue<Token> tokens = tokenize(input);
-                queue<Token> postfix = shunting_yard(tokens);
-                double result = evaluate(postfix, user);
-                cout << "= " << result << "\n\n";
-            } 
-            catch (const exception& e) {
-                cerr << "Error: " << e.what() << "\n\n";
+            tokens.pop();
+
+            if (tokens.empty()) {
+                throw std::runtime_error("Missing value after assignment");
             }
+
+            auto postfix = shunting_yard(tokens);
+            double value = evaluate(postfix, vars);
+            vars[var] = value;
+            last_assigned_var_ = var;
+            tokens = {}; // Полностью очищаем токены
+            return true;
+
+        } catch (...) {
+            tokens = original_tokens; // Восстанавливаем исходные токены
+            last_assigned_var_.clear();
+            throw;
         }
     }
-}
+
+    double evaluate(std::queue<Token> postfix, std::map<std::string, double>& vars) {
+        std::stack<double> stack;
+        
+        while (!postfix.empty()) {
+            Token token = postfix.front();
+            postfix.pop();
+
+            switch(token.type) {
+                case TokenType::Number:
+                    stack.push(token.number_value); break;
+                    
+                case TokenType::Variable: {
+                    auto it = vars.find(token.variable_name);
+                    if (it == vars.end()) {
+                        throw std::runtime_error("Undefined variable: " + token.variable_name);
+                    }
+                    stack.push(it->second);
+                    break;
+                }
+                    
+                case TokenType::Operator: {
+                    if (stack.size() < 2) throw std::runtime_error("Not enough operands");
+                    double b = stack.top(); stack.pop();
+                    double a = stack.top(); stack.pop();
+                    
+                    switch(token.operator_symbol) {
+                        case '+': stack.push(a + b); break;
+                        case '-': stack.push(a - b); break;
+                        case '*': stack.push(a * b); break;
+                        case '/': 
+                            if (b == 0) throw std::runtime_error("Division by zero");
+                            stack.push(a / b); break;
+                    }
+                    break;
+                }
+                
+                default: break;
+            }
+        }
+        
+        if (stack.size() != 1) throw std::runtime_error("Invalid expression");
+        return stack.top();
+    }
+};

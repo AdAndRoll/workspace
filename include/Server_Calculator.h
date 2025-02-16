@@ -1,109 +1,152 @@
+#pragma once
 #include <httplib.h>
 #include <nlohmann/json.hpp>
-#include "Calculator.h"
-#include <map>
+#include <memory>
+#include <mutex>
 #include <sstream>
+#include "SessionManager.h"
+#include "Calculator.h"
 
-using namespace httplib;
+namespace calcserver {
+
 using json = nlohmann::json;
 
-std::map<std::string, std::map<std::string, double>> sessions;
+// =============================================
+// Request Processing Chain
+// =============================================
+class IRequestHandler {
+protected:
+    std::shared_ptr<IRequestHandler> next_;
+    
+public:
+    virtual ~IRequestHandler() = default;
+    
+    void set_next(std::shared_ptr<IRequestHandler> handler) {
+        next_ = handler;
+    }
 
-std::string trim(const std::string& str) {
-    size_t first = str.find_first_not_of(" \t");
-    if (first == std::string::npos) return "";
-    size_t last = str.find_last_not_of(" \t");
-    return str.substr(first, (last - first + 1));
-}
+    virtual bool handle(const json& request, 
+                       json& response,
+                       SessionManager& session_manager,
+                       const std::string& user) = 0;
+};
 
-void start_calculator_server() {
-    Server svr;
-
-    svr.Post("/api/calculate", [](const Request& req, Response& res) {
-        try {
-            json request = json::parse(req.body);
-            std::string user = request.value("user", "");
-
-            if (user.empty()) {
-                throw std::runtime_error("User ID is required");
-            }
-
-            // Если сессии нет, создаем новую
-            if (sessions.find(user) == sessions.end()) {
-                sessions[user] = {};
-            }
-
-            if (request.contains("cmd") && request["cmd"] == "clean") {
-                // Очистка текущей сессии
-                sessions[user].clear();
-                json response = {{"res", "OK"}};
-                res.set_content(response.dump(), "application/json");
-                return;
-            }
-
-            if (request.contains("exp")) {
-                std::string expression = request["exp"];
-                std::istringstream expr_stream(expression);
-                std::string line;
-                double last_result = 0.0;
-                bool has_result = false;
-                bool assignment_made = false;
-
-                while (std::getline(expr_stream, line, ';')) {
-                    line = trim(line);
-                    if (line.empty()) continue;
-
-                    size_t eq_pos = line.find('=');
-                    if (eq_pos != std::string::npos) {
-                        std::string var_name = trim(line.substr(0, eq_pos));
-                        std::string value_str = trim(line.substr(eq_pos + 1));
-
-                        // Обрабатываем выражение присваивания
-                        auto tokens = tokenize(value_str);
-                        auto postfix = shunting_yard(tokens);
-                        double value = evaluate(postfix, user);
-
-                        // Сохраняем переменную для сессии
-                        sessions[user][var_name] = value;
-
-                        assignment_made = true;
-                        continue;
-                    }
-
-                    // Подставляем переменные из сессии в выражение
-                    for (const auto& var : sessions[user]) {
-                        size_t pos = 0;
-                        while ((pos = line.find(var.first, pos)) != std::string::npos) {
-                            line.replace(pos, var.first.length(), std::to_string(var.second));
-                            pos += std::to_string(var.second).length();
-                        }
-                    }
-
-                    auto tokens = tokenize(line);
-                    auto postfix = shunting_yard(tokens);
-                    last_result = evaluate(postfix, user);
-                    has_result = true;
-                }
-
-                if (assignment_made) {
-                    json response = {{"res", "OK"}};
-                    res.set_content(response.dump(), "application/json");
-                } else if (has_result) {
-                    json response = {{"res", last_result}};
-                    res.set_content(response.dump(), "application/json");
-                }
-                return;
-            }
-
-            throw std::runtime_error("Invalid request format");
-
-        } catch (const std::exception& e) {
-            json error = {{"err", e.what()}};
-            res.status = 400;
-            res.set_content(error.dump(), "application/json");
+class CleanCommandHandler : public IRequestHandler {
+public:
+    bool handle(const json& request, 
+               json& response,
+               SessionManager& session_manager,
+               const std::string& user) override 
+    {
+        if (request.contains("cmd") && request["cmd"] == "clean") {
+            session_manager.clear_session(user);
+            response["res"] = "OK";
+            return true;
         }
-    });
+        return next_ ? next_->handle(request, response, session_manager, user) : false;
+    }
+};
 
-    std::cout << "Calculator Server started at http://localhost:8080\n";
-    svr.listen("0.0.0.0", 8080);
-}
+class ExpressionHandler : public IRequestHandler {
+public:
+    bool handle(const json& request, 
+               json& response,
+               SessionManager& session_manager,
+               const std::string& user) override 
+    {
+        if (request.contains("exp")) {
+            auto& vars = session_manager.get_session(user);
+            Calculator calc;
+            json results = json::array();
+            std::istringstream iss(request["exp"].get<std::string>());
+            std::string line;
+            bool has_result = false;
+
+            while (std::getline(iss, line, ';')) {
+                line = Calculator::trim(line);
+                if (line.empty()) continue;
+
+                try {
+                    double result = calc.calculate(line, vars);
+                    has_result = true;
+
+                    // Формируем результат в зависимости от типа операции
+                    if (calc.was_assignment()) {
+                        results.push_back({{calc.get_last_var(), result}});
+                    } else {
+                        results.push_back(result);
+                    }
+                } catch (const std::exception& e) {
+                    throw std::runtime_error("Error in '" + line + "': " + e.what());
+                }
+            }
+
+            if (!has_result) {
+                throw std::runtime_error("No valid expressions");
+            }
+
+            response["res"] = results;
+            return true;
+        }
+        return false;
+    }
+};
+
+// =============================================
+// Calculator Service Facade
+// =============================================
+class CalculatorService {
+    httplib::Server server_;
+    std::shared_ptr<SessionManager> session_manager_;
+    std::shared_ptr<IRequestHandler> request_chain_;
+    
+public:
+    CalculatorService(std::shared_ptr<SessionManager> session_manager)
+        : session_manager_(session_manager)
+    {
+        build_handler_chain();
+        setup_routes();
+    }
+
+    void start(int port = 8080) {
+        std::cout << "Calculator service running on port " << port << "\n";
+        server_.listen("0.0.0.0", port);
+    }
+
+private:
+    void build_handler_chain() {
+        auto clean_handler = std::make_shared<CleanCommandHandler>();
+        auto expr_handler = std::make_shared<ExpressionHandler>();
+        
+        clean_handler->set_next(expr_handler);
+        request_chain_ = clean_handler;
+    }
+
+    void setup_routes() {
+        server_.Post("/api/calculate", [&](const httplib::Request& req, httplib::Response& res) {
+            try {
+                json request = json::parse(req.body);
+                json response;
+                std::string user = request.value("user", "default");
+                
+                if (!request_chain_->handle(request, response, *session_manager_, user)) {
+                    throw std::runtime_error("Unsupported request format");
+                }
+                
+                res.set_content(response.dump(), "application/json");
+                
+            } catch (const std::exception& e) {
+                res.status = 400;
+                json error = {{"error", e.what()}};
+                res.set_content(error.dump(), "application/json");
+            }
+        });
+
+        server_.set_error_handler([](const httplib::Request&, httplib::Response& res) {
+            json error = {{"error", "Internal server error"}};
+            res.set_content(error.dump(), "application/json");
+        });
+    }
+};
+
+} // namespace calcserver

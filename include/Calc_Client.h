@@ -1,87 +1,187 @@
+#pragma once
 #include <iostream>
+#include <memory>
 #include <sstream>
-#include <string>
 #include <vector>
+#include <algorithm>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 namespace calcclient {
 
-    inline void run_client(int argc, char* argv[]) {
-        if (argc < 3) {
-            std::cerr << "Usage: " << argv[0] << " -c <command> OR -e <expression...> [-u <user>]\n";
-            return;
-        }
+    using json = nlohmann::json;
 
-        std::string flag;
-        std::string user;
-        std::ostringstream expression_stream;
-        std::string command;
+    // =============================================
+    // Базовые классы и исключения
+    // =============================================
+    class ICommand {
+    public:
+        virtual ~ICommand() = default;
+        virtual void execute() = 0;
+    };
 
-        // Разбираем аргументы, чтобы найти -u (имя пользователя) в любом месте
-        for (int i = 1; i < argc; ++i) {
-            std::string arg = argv[i];
+    class CommandException : public std::exception {
+        std::string message_;
+    public:
+        CommandException(const std::string& msg) : message_(msg) {}
+        const char* what() const noexcept override { return message_.c_str(); }
+    };
 
-            if (arg == "-u" && i + 1 < argc) {
-                user = argv[i + 1];
-                ++i;  // Пропускаем следующий аргумент, т.к. это имя пользователя
-            } else if (arg == "-c" || arg == "-e") {
-                flag = arg;
+    // =============================================
+    // Конкретные команды
+    // =============================================
+    class CalculateCommand : public ICommand {
+        std::string expression_;
+        std::string user_;
+
+        // void replace_special_chars(std::string& expr) {
+        //     std::replace(expr.begin(), expr.end(), '*', '#'); 
+        // }
+
+    public:
+        CalculateCommand(const std::string& expr, const std::string& user)
+            : expression_(expr), user_(user) {}
+
+        void execute() override {
+            httplib::Client cli("localhost", 8080);
+            cli.set_connection_timeout(3);
+
+            // Обработка спецсимволов и формирование запроса
+            std::string processed_expr = expression_;
+            // replace_special_chars(processed_expr);
+
+            json req;
+            req["exp"] = expression_;
+            if (!user_.empty()) req["user"] = user_;
+
+            if (auto res = cli.Post("/api/calculate", req.dump(), "application/json")) {
+                handle_response(*res);
             } else {
-                if (flag == "-c") {
-                    if (!command.empty()) command += " ";
-                    command += arg;
-                } else if (flag == "-e") {
-                    if (!expression_stream.str().empty()) expression_stream << " ";
-                    expression_stream << arg;
-                }
+                throw CommandException("Ошибка соединения: " + httplib::to_string(res.error()));
             }
         }
 
-        if (flag.empty()) {
-            std::cerr << "Unknown flag: please specify -c or -e\n";
-            return;
-        }
-
-        nlohmann::json request_json;
-
-        if (flag == "-c") {
-            request_json["cmd"] = command;
-        } else if (flag == "-e") {
-            request_json["exp"] = expression_stream.str();
-        }
-
-        if (!user.empty()) {
-            request_json["user"] = user;
-        }
-
-        // Создаем HTTP-клиент, обращающийся к серверу на localhost:8080
-        httplib::Client cli("localhost", 8080);
-        cli.set_connection_timeout(3);
-
-        // Отправляем POST-запрос на эндпоинт /api/calculate с JSON-телом
-        auto res = cli.Post("/api/calculate", request_json.dump(), "application/json");
-
-        if (res && res->status == 200) {
+    private:
+        void handle_response(const httplib::Response& res) {
             try {
-                auto response_json = nlohmann::json::parse(res->body);
-                if (response_json.contains("res")) {
-                    std::cout << response_json["res"] << "\n";
-                } else if (response_json.contains("error")) {
-                    std::cerr << "Error: " << response_json["error"] << "\n";
+                json response = json::parse(res.body);
+                
+                if (res.status == 200) {
+                    if (response.contains("res")) {
+                        std::cout << "Результат: " << response["res"].get<double>() << "\n";
+                    } else if (response.contains("error")) {
+                        throw std::runtime_error(response["error"].get<std::string>());
+                    }
                 } else {
-                    std::cerr << "Invalid response: " << res->body << "\n";
+                    throw std::runtime_error("Ошибка сервера: " + res.body);
                 }
-            } catch (const std::exception& ex) {
-                std::cerr << "Failed to parse response: " << ex.what() << "\n";
+            } catch (const json::exception& e) {
+                throw CommandException("Некорректный JSON: " + std::string(e.what()));
             }
-        } else {
-            std::cerr << "Request failed. ";
-            if (res) {
-                std::cerr << "Status: " << res->status << "\n";
+        }
+    };
+
+    class CleanCommand : public ICommand {
+        std::string user_;
+
+    public:
+        CleanCommand(const std::string& user) : user_(user) {}
+
+        void execute() override {
+            httplib::Client cli("localhost", 8080);
+            cli.set_connection_timeout(3);
+
+            json req;
+            req["cmd"] = "clean";
+            if (!user_.empty()) req["user"] = user_;
+
+            if (auto res = cli.Post("/api/calculate", req.dump(), "application/json")) {
+                if (res->status == 200) {
+                    std::cout << "Сессия пользователя '" << user_ << "' очищена\n";
+                } else {
+                    throw CommandException("Ошибка: " + res->body);
+                }
             } else {
-                std::cerr << "No response.\n";
+                throw CommandException("Ошибка соединения: " + httplib::to_string(res.error()));
             }
+        }
+    };
+
+    // =============================================
+    // Фабрика команд
+    // =============================================
+    class CommandFactory {
+    public:
+        static std::unique_ptr<ICommand> create(int argc, char* argv[]) {
+            std::string user, command_type;
+            std::vector<std::string> args;
+
+            // Парсинг аргументов
+            for (int i = 1; i < argc; ++i) {
+                std::string arg = argv[i];
+                if (arg == "-u" && i + 1 < argc) {
+                    user = argv[++i];
+                } else if (arg == "-c" || arg == "-e") {
+                    command_type = arg;
+                    while (++i < argc && argv[i][0] != '-') {
+                        args.push_back(argv[i]);
+                    }
+                    --i;
+                }
+            }
+
+            // Валидация
+            if (command_type.empty()) {
+                throw CommandException("Не указан тип команды (-c/-e)");
+            }
+
+            // Сборка выражения
+            std::ostringstream expr_stream;
+            for (const auto& part : args) {
+                expr_stream << part << " ";
+            }
+            std::string expr = expr_stream.str();
+            if (!expr.empty()) expr.pop_back();
+
+            // Создание команды
+            if (command_type == "-c") {
+                if (expr == "clean") {
+                    return std::make_unique<CleanCommand>(user);
+                }
+                throw CommandException("Неизвестная команда: " + expr);
+            }
+            else if (command_type == "-e") {
+                if (expr.empty()) {
+                    throw CommandException("Пустое выражение");
+                }
+                return std::make_unique<CalculateCommand>(expr, user);
+            }
+
+            throw CommandException("Некорректный формат команды");
+        }
+    };
+
+    // =============================================
+    // Точка входа клиента
+    // =============================================
+    void run_client(int argc, char* argv[]) {
+        try {
+            auto command = CommandFactory::create(argc, argv);
+            if (command) {
+                command->execute();
+            }
+        } catch (const CommandException& e) {
+            std::cerr << "ОШИБКА: " << e.what() << "\n\n";
+            std::cerr << "Использование:\n"
+                      << "  " << argv[0] << " [-u пользователь] (-c <команда> | -e <выражение>)\n"
+                      << "Команды:\n"
+                      << "  -c clean    Очистить сессию\n"
+                      << "  -e <expr>   Вычислить выражение\n"
+                      << "Примеры:\n"
+                      << "  " << argv[0] << " -u alice -e \"x=5; x*2\"\n"
+                      << "  " << argv[0] << " -u bob -c clean\n";
+        } catch (const std::exception& e) {
+            std::cerr << "КРИТИЧЕСКАЯ ОШИБКА: " << e.what() << "\n";
         }
     }
 
