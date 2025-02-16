@@ -26,12 +26,15 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(httplib nlohmann_json)
 
-# Поиск исходников
-file(GLOB_RECURSE SOURCES "src/*.cpp")
-file(GLOB_RECURSE HEADERS "include/*.h" "src/*.h")
+# Поиск исходников сервера
+file(GLOB_RECURSE SERVER_SOURCES "src/*.cpp")
+file(GLOB_RECURSE SERVER_HEADERS "include/*.h" "src/*.h")
 
-# Сборка исполняемого файла
-add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+# Исключаем client_interface.cpp из сборки сервера
+list(FILTER SERVER_SOURCES EXCLUDE REGEX ".*client_interface.cpp")
+
+# Сборка исполняемого файла сервера
+add_executable(${PROJECT_NAME} ${SERVER_SOURCES} ${SERVER_HEADERS})
 
 # Настройка путей для заголовков
 target_include_directories(${PROJECT_NAME} PRIVATE 
@@ -43,6 +46,29 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # Подключение библиотек
 target_link_libraries(${PROJECT_NAME} PRIVATE 
+    httplib 
+    ssl 
+    crypto 
+    nlohmann_json::nlohmann_json
+)
+
+# ==========================
+# Сборка клиента
+# ==========================
+
+# Добавляем отдельный исполняемый файл для клиента
+add_executable(calc_client src/client_interface.cpp)
+
+# Указываем, где искать заголовочные файлы для клиента
+target_include_directories(calc_client PRIVATE 
+    include 
+    src 
+    ${httplib_SOURCE_DIR}/include
+    ${nlohmann_json_SOURCE_DIR}/include
+)
+
+# Подключаем те же библиотеки, что и сервер
+target_link_libraries(calc_client PRIVATE 
     httplib 
     ssl 
     crypto 
