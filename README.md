@@ -196,6 +196,18 @@ root@3ecd72343269:/workspace# ./build/calc_client  -e x=2 -u sta
 root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e x
 2.0
 ```
+---
+### Задание 12
 
+Рефакторинг архитектуры:
 
+1. Внедрены паттерны проектирования:
+
+   1. Command — для обработки клиентских команд (CalculateCommand, CleanCommand).
+
+   2. Chain of Responsibility — для последовательной обработки запросов на сервере.
+
+   3. Facade — упрощение взаимодействия с модулями (CalculatorService).
+
+2. Удалены избыточные компоненты 
 
