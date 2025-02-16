@@ -68,7 +68,7 @@ Hello, World!
 ```bash
 rm -rf build && cmake -B build -S . && cmake --build build
 ```
-
+---
 ## Задание 5
 
 ### для запуска сервера нужно ввести комманду 
@@ -96,7 +96,29 @@ Headers:
 Body:
 {"message": "Test"}
 ```
+---
+### Задание 6
+принимает любое выражение и выдает в ответ 
 
+input
+```bash
+(-3+4)*5
+```
+output
+```bash
+5
+```
+---
+### Задание 7
+
+После включение сервера можно отправить запрос в формате 
+```bash
+curl -X POST http://localhost:8080/api/calculate   -H "Content-Type: application/json"   -d '{"exp":"(3 + 4) * 2"}'
+```
+output
+```bash
+{"res":14.0}
+```
 
 
 
