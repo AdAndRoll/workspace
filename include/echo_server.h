@@ -1,3 +1,5 @@
+#pragma once
+
 #include <httplib.h>
 #include <iostream>
 #include <sstream>
