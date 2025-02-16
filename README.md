@@ -118,7 +118,25 @@ curl -X POST http://localhost:8080/api/calculate   -H "Content-Type: application
 output
 ```bash
 {"res":14.0}
-```
+---
 
+### Задание 8
+
+Теперь для отправки запроса с клиента нужно сначала запустить сервер коммандой
+```bash
+./build/workspace 
+```
+После этого с другого терминала сервер может принять запрос в виде
+```bash
+./build/calc_client -e 2 + 2
+//или
+./build/calc_client -c echo
+```
+```
+Ответ
+```bash
+4.0
+"echo"
+```
 
 
