@@ -39,24 +39,9 @@ namespace calcclient {
         // Создаем HTTP-клиент, обращающийся к серверу на localhost:8080
         httplib::Client cli("localhost", 8080); 
         cli.set_connection_timeout(3); 
-        // std::cout << "Отправка запроса на сервер: " << request_json.dump() << std::endl;
-        // std::cout << "Адрес подключения: " << cli.host() << ":" << cli.port() << std::endl;
 
         // Отправляем POST-запрос на эндпоинт /api/calculate с JSON-телом
         auto res = cli.Post("/api/calculate", request_json.dump(), "application/json");
-        
-        // if (!res) {
-        //     auto err = res.error();
-        //     std::cerr << "Connection error: " 
-        //               << httplib::to_string(err) << "\n";
-        //     return;
-        // }
-
-        // if (res) {
-        //     std::cout << "Ответ сервера: " << res->body << std::endl;
-        // } else {
-        //     std::cerr << "Ошибка запроса: " << res.error() << std::endl;
-        // }
 
         if (res && res->status == 200) {
             try {
