@@ -158,6 +158,8 @@ c ответом
 ```bash
 ./build/calc_client -e x=2
 "OK"
+./build/calc_client -e x
+2.0
 ./build/calc_client -e "var = 2 + 3; \
 var * 2"
 10.0
