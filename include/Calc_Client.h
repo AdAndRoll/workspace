@@ -24,12 +24,37 @@ namespace calcclient {
         } else if (flag == "-e") {
             // Режим выражения: объединяем все аргументы начиная с argv[2]
             std::ostringstream oss;
+            std::string expression;
             for (int i = 2; i < argc; ++i) {
-                oss << argv[i];
+                expression += argv[i];
                 if (i < argc - 1)
-                    oss << " ";
+                    expression += " ";
             }
-            request_json["exp"] = oss.str();
+
+            // Обрабатываем многострочные запросы
+            std::string full_expr;
+            std::istringstream expr_stream(expression);
+            std::string line;
+            bool multi_line = false;
+
+            while (std::getline(expr_stream, line)) {
+                // Проверяем на наличие продолжения строки с символом '\'
+                if (line.back() == '\\') {
+                    line.pop_back();  // Убираем символ продолжения
+                    full_expr += line + " ";  // Добавляем строку в полный запрос
+                    multi_line = true;
+                } else {
+                    full_expr += line;  // Строка завершена
+                    if (multi_line) {
+                        // Если это многострочное выражение, отправляем запрос
+                        request_json["exp"] = full_expr;
+                        multi_line = false;
+                    } else {
+                        // Для однострочных выражений также передаем запрос
+                        request_json["exp"] = full_expr;
+                    }
+                }
+            }
         } else {
             std::cerr << "Unknown flag: " << flag << "\n";
             std::cerr << "Usage: " << argv[0] << " -c <command> OR -e <expression...>\n";
@@ -39,24 +64,9 @@ namespace calcclient {
         // Создаем HTTP-клиент, обращающийся к серверу на localhost:8080
         httplib::Client cli("localhost", 8080); 
         cli.set_connection_timeout(3); 
-        // std::cout << "Отправка запроса на сервер: " << request_json.dump() << std::endl;
-        // std::cout << "Адрес подключения: " << cli.host() << ":" << cli.port() << std::endl;
 
         // Отправляем POST-запрос на эндпоинт /api/calculate с JSON-телом
         auto res = cli.Post("/api/calculate", request_json.dump(), "application/json");
-        
-        // if (!res) {
-        //     auto err = res.error();
-        //     std::cerr << "Connection error: " 
-        //               << httplib::to_string(err) << "\n";
-        //     return;
-        // }
-
-        // if (res) {
-        //     std::cout << "Ответ сервера: " << res->body << std::endl;
-        // } else {
-        //     std::cerr << "Ошибка запроса: " << res.error() << std::endl;
-        // }
 
         if (res && res->status == 200) {
             try {
