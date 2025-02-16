@@ -171,7 +171,31 @@ var * 2"
 Request failed. Status: 400
 
 ```
-
+---
+### Задание 11
+пример работающих запросов:
+```bash
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e x=2 
+"OK"
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e y=2
+"OK"
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e y+x
+4.0
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e y*2*x*3
+24.0
+root@3ecd72343269:/workspace# ./build/calc_client  -u st -e x 
+Request failed. Status: 400
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e x
+2.0
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -c clean
+"OK"
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e x
+Request failed. Status: 400
+root@3ecd72343269:/workspace# ./build/calc_client  -e x=2 -u sta
+"OK"
+root@3ecd72343269:/workspace# ./build/calc_client  -u sta -e x
+2.0
+```
 
 
 
