@@ -1,5 +1,3 @@
-#pragma once
-
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -11,59 +9,55 @@ namespace calcclient {
 
     inline void run_client(int argc, char* argv[]) {
         if (argc < 3) {
-            std::cerr << "Usage: " << argv[0] << " -c <command> OR -e <expression...>\n";
+            std::cerr << "Usage: " << argv[0] << " -c <command> OR -e <expression...> [-u <user>]\n";
             return;
         }
 
-        std::string flag = argv[1];
+        std::string flag;
+        std::string user;
+        std::ostringstream expression_stream;
+        std::string command;
+
+        // Разбираем аргументы, чтобы найти -u (имя пользователя) в любом месте
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+
+            if (arg == "-u" && i + 1 < argc) {
+                user = argv[i + 1];
+                ++i;  // Пропускаем следующий аргумент, т.к. это имя пользователя
+            } else if (arg == "-c" || arg == "-e") {
+                flag = arg;
+            } else {
+                if (flag == "-c") {
+                    if (!command.empty()) command += " ";
+                    command += arg;
+                } else if (flag == "-e") {
+                    if (!expression_stream.str().empty()) expression_stream << " ";
+                    expression_stream << arg;
+                }
+            }
+        }
+
+        if (flag.empty()) {
+            std::cerr << "Unknown flag: please specify -c or -e\n";
+            return;
+        }
+
         nlohmann::json request_json;
 
         if (flag == "-c") {
-            // Режим команды (например, echo)
-            request_json["cmd"] = argv[2];
+            request_json["cmd"] = command;
         } else if (flag == "-e") {
-            // Режим выражения: объединяем все аргументы начиная с argv[2]
-            std::ostringstream oss;
-            std::string expression;
-            for (int i = 2; i < argc; ++i) {
-                expression += argv[i];
-                if (i < argc - 1)
-                    expression += " ";
-            }
+            request_json["exp"] = expression_stream.str();
+        }
 
-            // Обрабатываем многострочные запросы
-            std::string full_expr;
-            std::istringstream expr_stream(expression);
-            std::string line;
-            bool multi_line = false;
-
-            while (std::getline(expr_stream, line)) {
-                // Проверяем на наличие продолжения строки с символом '\'
-                if (line.back() == '\\') {
-                    line.pop_back();  // Убираем символ продолжения
-                    full_expr += line + " ";  // Добавляем строку в полный запрос
-                    multi_line = true;
-                } else {
-                    full_expr += line;  // Строка завершена
-                    if (multi_line) {
-                        // Если это многострочное выражение, отправляем запрос
-                        request_json["exp"] = full_expr;
-                        multi_line = false;
-                    } else {
-                        // Для однострочных выражений также передаем запрос
-                        request_json["exp"] = full_expr;
-                    }
-                }
-            }
-        } else {
-            std::cerr << "Unknown flag: " << flag << "\n";
-            std::cerr << "Usage: " << argv[0] << " -c <command> OR -e <expression...>\n";
-            return;
+        if (!user.empty()) {
+            request_json["user"] = user;
         }
 
         // Создаем HTTP-клиент, обращающийся к серверу на localhost:8080
-        httplib::Client cli("localhost", 8080); 
-        cli.set_connection_timeout(3); 
+        httplib::Client cli("localhost", 8080);
+        cli.set_connection_timeout(3);
 
         // Отправляем POST-запрос на эндпоинт /api/calculate с JSON-телом
         auto res = cli.Post("/api/calculate", request_json.dump(), "application/json");
