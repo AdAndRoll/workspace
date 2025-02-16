@@ -28,8 +28,8 @@ struct Token {
     Token(string var) : type(VARIABLE), value(0), variable_name(var) {}
 };
 
-// Добавим переменные в калькулятор
-extern map<string, double> variables;
+// Теперь переменные хранятся в сессиях
+extern map<string, map<string, double>> sessions;
 
 // ========================
 // Объявления функций
@@ -37,7 +37,7 @@ extern map<string, double> variables;
 
 queue<Token> tokenize(const string& expr);
 queue<Token> shunting_yard(queue<Token> tokens);
-double evaluate(queue<Token> postfix);
+double evaluate(queue<Token> postfix, const string& user);
 void run_calculator();
 
 // ========================
@@ -87,9 +87,10 @@ queue<Token> tokenize(const string& expr) {
                     tokens.push(Token(RIGHT_PAREN));
                     break;
                 case '=':
-                    if (!var_str.empty()) {
-                        tokens.push(Token(var_str));
-                        var_str.clear();
+                    if (!tokens.empty() && tokens.back().type == VARIABLE) {
+                        tokens.push(Token(OPERATOR));
+                    } else {
+                        throw invalid_argument("Invalid assignment format");
                     }
                     break;
                 default:
@@ -115,10 +116,19 @@ queue<Token> tokenize(const string& expr) {
     return tokens;
 }
 
-// Допустим, что для переменных мы используем обычные выражения
-double evaluate(queue<Token> postfix) {
-    stack<double> values;
+// Используем пользовательскую сессию при вычислениях
+double evaluate(queue<Token> postfix, const string& user) {
+    if (postfix.empty()) {
+        throw runtime_error("Empty expression");
+    }
 
+    stack<double> values;
+    if (user.empty()) {
+        throw runtime_error("User session not specified");
+    }
+    if (sessions.find(user) == sessions.end()) {
+        throw runtime_error("User session does not exist");
+    }
     while (!postfix.empty()) {
         Token token = postfix.front();
         postfix.pop();
@@ -143,17 +153,16 @@ double evaluate(queue<Token> postfix) {
             }
         }
         else if (token.type == VARIABLE) {
-            if (variables.find(token.variable_name) == variables.end()) {
+            if (sessions[user].find(token.variable_name) == sessions[user].end()) {
                 throw runtime_error("Variable not defined: " + token.variable_name);
             }
-            values.push(variables[token.variable_name]);
+            values.push(sessions[user][token.variable_name]);
         }
     }
 
     if (values.size() != 1) throw invalid_argument("Invalid expression");
     return values.top();
 }
-
 
 // Функция преобразования из инфиксной записи в постфиксную (реализация в заголовочном файле)
 inline queue<Token> shunting_yard(queue<Token> tokens) {
@@ -167,8 +176,8 @@ inline queue<Token> shunting_yard(queue<Token> tokens) {
         if (token.type == NUMBER || token.type == VARIABLE) {
             output.push(token);
         } else if (token.type == OPERATOR) {
-            while (!ops.empty() && ops.top().op != '(' &&
-                   (token.op == '+' || token.op == '-' || token.op == '*' || token.op == '/')) {
+            while (!ops.empty() && ops.top().type == OPERATOR &&
+                   ((token.op == '+' || token.op == '-') && (ops.top().op == '*' || ops.top().op == '/'))) {
                 output.push(ops.top());
                 ops.pop();
             }
@@ -176,7 +185,7 @@ inline queue<Token> shunting_yard(queue<Token> tokens) {
         } else if (token.type == LEFT_PAREN) {
             ops.push(token);
         } else if (token.type == RIGHT_PAREN) {
-            while (!ops.empty() && ops.top().op != '(') {
+            while (!ops.empty() && ops.top().type != LEFT_PAREN) {
                 output.push(ops.top());
                 ops.pop();
             }
@@ -193,13 +202,13 @@ inline queue<Token> shunting_yard(queue<Token> tokens) {
     return output;
 }
 
-
 void run_calculator() {
-    cout << "Calculator (enter 'exit' to quit, 'set <var> <value>' to set variable)\n";
+    cout << "Calculator (enter 'exit' to quit, 'set <var> <value>' to set variable, 'user <name>' to change session)\n";
     string input;
+    string user = "default"; // По умолчанию используем сессию "default"
 
     while (true) {
-        cout << "> ";
+        cout << "[" << user << "]> ";
         getline(cin, input);
         if (input.empty()) continue;
         if (input == "exit") break;
@@ -208,14 +217,24 @@ void run_calculator() {
             stringstream ss(input.substr(4));
             string var_name;
             double value;
-            ss >> var_name >> value;
-            variables[var_name] = value;
-            cout << var_name << " set to " << value << "\n";
-        } else {
+            if (!(ss >> var_name >> value)) {
+                cerr << "Invalid set command format\n";
+                continue;
+            }
+            sessions[user][var_name] = value;
+            cout << var_name << " set to " << value << " in session " << user << "\n";
+        } 
+        else if (input.substr(0, 4) == "user") {
+            stringstream ss(input.substr(5));
+            ss >> user;
+            if (user.empty()) user = "default";
+            cout << "Switched to user session: " << user << "\n";
+        } 
+        else {
             try {
                 queue<Token> tokens = tokenize(input);
                 queue<Token> postfix = shunting_yard(tokens);
-                double result = evaluate(postfix);
+                double result = evaluate(postfix, user);
                 cout << "= " << result << "\n\n";
             } 
             catch (const exception& e) {

@@ -1,5 +1,3 @@
-#pragma once
-
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include "Calculator.h"
@@ -9,7 +7,7 @@
 using namespace httplib;
 using json = nlohmann::json;
 
-std::map<std::string, double> variables;
+std::map<std::string, std::map<std::string, double>> sessions;
 
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t");
@@ -24,10 +22,21 @@ void start_calculator_server() {
     svr.Post("/api/calculate", [](const Request& req, Response& res) {
         try {
             json request = json::parse(req.body);
+            std::string user = request.value("user", "");
+
+            if (user.empty()) {
+                throw std::runtime_error("User ID is required");
+            }
+
+            // Если сессии нет, создаем новую
+            if (sessions.find(user) == sessions.end()) {
+                sessions[user] = {};
+            }
 
             if (request.contains("cmd") && request["cmd"] == "clean") {
-                variables.clear();
-                json response = {{"res", "OK"}};  // Теперь clean возвращает "OK"
+                // Очистка текущей сессии
+                sessions[user].clear();
+                json response = {{"res", "OK"}};
                 res.set_content(response.dump(), "application/json");
                 return;
             }
@@ -49,16 +58,20 @@ void start_calculator_server() {
                         std::string var_name = trim(line.substr(0, eq_pos));
                         std::string value_str = trim(line.substr(eq_pos + 1));
 
+                        // Обрабатываем выражение присваивания
                         auto tokens = tokenize(value_str);
                         auto postfix = shunting_yard(tokens);
-                        double value = evaluate(postfix);
+                        double value = evaluate(postfix, user);
 
-                        variables[var_name] = value;
+                        // Сохраняем переменную для сессии
+                        sessions[user][var_name] = value;
+
                         assignment_made = true;
-                        continue;  // Не вычисляем результат, если это присваивание
+                        continue;
                     }
 
-                    for (const auto& var : variables) {
+                    // Подставляем переменные из сессии в выражение
+                    for (const auto& var : sessions[user]) {
                         size_t pos = 0;
                         while ((pos = line.find(var.first, pos)) != std::string::npos) {
                             line.replace(pos, var.first.length(), std::to_string(var.second));
@@ -68,12 +81,12 @@ void start_calculator_server() {
 
                     auto tokens = tokenize(line);
                     auto postfix = shunting_yard(tokens);
-                    last_result = evaluate(postfix);
+                    last_result = evaluate(postfix, user);
                     has_result = true;
                 }
 
                 if (assignment_made) {
-                    json response = {{"res", "OK"}};  // Теперь присваивание возвращает "OK"
+                    json response = {{"res", "OK"}};
                     res.set_content(response.dump(), "application/json");
                 } else if (has_result) {
                     json response = {{"res", last_result}};
